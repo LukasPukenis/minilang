@@ -1,7 +1,10 @@
+#include <stdio.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include <math.h>
+#include <string.h>
 
-#define NULL 0
+char input[] = "4 + 3 * 2 + 1";
 
 typedef enum {
 	VALUE,
@@ -12,34 +15,53 @@ typedef enum {
 	ADD,
 	SUB,
 	MUL,
-	DIV
+	DIV,
+	PAREN_LEFT,
+	PAREN_RIGHT
 } OPERATOR_TYPE;
+
+const char * OPERATOR_TYPE_NAMES[] = {"+", "-", "*", "/", "(", ")"};
 
 struct ast {
 	NODE_TYPE node_type;
 	OPERATOR_TYPE operator_type;
-	short precedence;
 	double value;
 	struct ast* next;
-	bool reduced;
-	struct ast * left;
-	struct ast * right;
-	struct ast * parent;
-} ast_head, syntax_tree_head;
 
+	bool reduced;
+	struct ast* left;
+	struct ast* right;
+	struct ast* parent;
+} ast_head;
+
+/*
+	template_arithmetic is matching "VALUE OPERATOR VALUE"
+	template_parentheses is matching "( VALUE )"
+	template_unary is matching "OPERATOR VALUE"
+*/
 struct syntax_template {
 	NODE_TYPE node_type;
 	OPERATOR_TYPE operator_type;
 	struct syntax_template * next;
-};
+} template_arithmetic, template_parentheses, template_unary;
+
+void build_syntax_templates() {
+	// arithmetic template building "VAL OP VAL"
+	template_arithmetic.node_type = VALUE;
+	template_arithmetic.next = (struct syntax_template *)malloc(sizeof(struct syntax_template));
+	template_arithmetic.next->node_type = OPERATOR;
+	template_arithmetic.next->next = (struct syntax_template *)malloc(sizeof(struct syntax_template));
+	template_arithmetic.next->next->node_type = VALUE;
+	template_arithmetic.next->next->next = NULL;
+}
 
 // returns true if ast tree beginning with head matches the template beginning with template
-bool matches_template(struct ast * head, struct syntax_template * template) {
-	if (head->node_type != template->node_type || head->operator_type != template->operator_type) {
+bool matches_template(struct ast * head, struct syntax_template * check_template) {
+	if (head->node_type != check_template->node_type) {
 		return false;
 	}
-	else if (head->next != NULL) {
-		return matches_template(head->next, template->next);
+	else if (head->next != NULL && check_template->next != NULL) {
+		return matches_template(head->next, check_template->next);
 	}	
 	return true;
 }
@@ -54,30 +76,101 @@ void print_ast(struct ast * head) {
 
 	while (curr != NULL) {
 		if (curr->node_type == VALUE) {
-			printf("Node INT %f", curr->value);
+			printf("Node VALUE: %f", curr->value);
 		}
 		else {
-			printf("Node OPERATOR %f", curr->value);
+			printf("Node OPERATOR: %s", OPERATOR_TYPE_NAMES[curr->operator_type]);
 		}
-		printf(" | ");
+		printf("\n");
 		curr = curr->next;
 	}
 }
 
-void syntax_tree_print(struct ast * head) {
+double solve(struct ast * node) {
+	OPERATOR_TYPE op_type = node->operator_type;
 
-	printf("\n\nPrinting Syntax Tree: ");
+	if (node->left == NULL && node->right == NULL) {
+		printf("\nSolving: %f\n", node->value);
+		return node->value;
+	}
 
-	printf("\nDone printing Syntax Tree\n");
+	// binary operators
+	if (op_type == MUL) {
+		return solve(node->left) * solve(node->right);
+	} else if (op_type == DIV) {
+		return solve(node->left) / solve(node->right);
+	} else if (op_type == ADD) {
+		return solve(node->left) + solve(node->right);
+	} else if (op_type == SUB) {
+		return solve(node->left) - solve(node->right);
+	}	
 }
 
-void syntax_tree_insert(struct ast * instead, struct ast * combined) {
-
+void syntax_tree_evaluate(struct ast * head) {
+	printf("\n\nEval... ");
+	printf("Solved \"%s\" = %f", input, solve(head));
+	printf("\nSolved!\n");
 }
 
-void syntax_tree_build(struct ast * head) {
+void syntax_tree_build(struct ast * head, struct ast ** ast_tree) {
 	printf("\n\nBuilding syntax tree will\n");
+	// head = head->next; // skip first empty head node
 
+	struct ast * original_head = head;
+
+	while (head->next != NULL && head->next->next != NULL && head->next->next->next != NULL) {
+		if (!head->reduced && matches_template(head->next, &template_arithmetic) && (head->next->next->operator_type == MUL || head->next->next->operator_type == DIV)) {
+
+			struct ast * combined = head->next->next;
+			head->next->reduced = true;
+			combined->reduced = true;
+			combined->next->reduced = true;
+
+			combined->left = head->next;
+			combined->right = combined->next;
+			if (head->next->next->next->next == NULL) {
+				combined->next = NULL;
+			}
+			else {
+				combined->next = head->next->next->next->next;
+			}
+			
+			combined->node_type = VALUE;
+			head->next = combined;
+		}
+		else {
+			head = head->next;
+		}
+	}
+
+	head = original_head;
+
+	while (head->next != NULL && head->next->next != NULL && head->next->next->next != NULL) {
+		if (!head->reduced && matches_template(head->next, &template_arithmetic) && (head->next->next->operator_type == ADD || head->next->next->operator_type == SUB)) {
+
+			struct ast * combined = head->next->next;
+			head->next->reduced = true;
+			combined->reduced = true;
+			combined->next->reduced = true;
+
+			combined->left = head->next;
+			combined->right = combined->next;
+			if (head->next->next->next->next == NULL) {
+				combined->next = NULL;
+			}
+			else {
+				combined->next = head->next->next->next->next;
+			}
+
+			combined->node_type = VALUE;
+			head->next = combined;
+		}
+		else {
+			head = head->next;
+		}		
+	}
+
+	*ast_tree = head;
 	printf("\nDone building\n");
 }
 
@@ -85,6 +178,8 @@ void ast_add_value(double value) {
 	struct ast * new_node = (struct ast*)malloc(sizeof(struct ast));
 	new_node->node_type = VALUE;
 	new_node->next = NULL;
+	new_node->left = NULL;
+	new_node->right = NULL;
 	new_node->reduced = false;
 
 	new_node->value = value;
@@ -115,12 +210,11 @@ void ast_add_operator(OPERATOR_TYPE type) {
 	curr->next = new_node;
 }
 
-char input[] = "100-123+456.78";
-
 int main(int argc, char** argv)
 {
 	printf("Lets process this: %s\n", input);
 
+	build_syntax_templates();
 	ast_head.next = NULL;
 
 	// This will be set once numeric is detected. Then if dot is detected it will be known it's float
@@ -128,14 +222,17 @@ int main(int argc, char** argv)
 	bool last_was_numeric = false;
 	bool dot_was_detected = false;
 
-	for (int i = 0, len = sizeof(input)-1; i < len; i++) {
+	for (int i = 0, len = sizeof(input); i < len; i++) {
 		printf("\n*************\nProcessing %c\n", input[i]);
 		char val = input[i];
 
-		// check for numeric token end
-		if (i + 1 == len || ((val < '0' || val > '9') && val != '.' && numeric_start_pos != -1 && last_was_numeric)) {
-			printf("Numeric ended at %d\n", i);
+		// Ignore whitespace
+		if (val == ' ') continue;
 
+		// check for numeric token end
+		if (i == len || ((val < '0' || val > '9') && val != '.' && numeric_start_pos != -1 && last_was_numeric)) {
+			printf("Numeric ended at %d\n", i);
+			
 			char * buffer = malloc((i - numeric_start_pos) *sizeof(char));
 			strncpy(buffer, (input + numeric_start_pos), i - numeric_start_pos + 1);
 
@@ -168,9 +265,11 @@ int main(int argc, char** argv)
 		else if (val == '/') {
 			ast_add_operator(DIV);
 		}
-
 		else if (val == '.') {
 			dot_was_detected = true;
+		}
+		else if (val == '\0') {
+			// ASCIIZ ending. so ignore
 		}
 		else {
 			printf("Unsupported operator\n");
@@ -181,10 +280,10 @@ int main(int argc, char** argv)
 
 	print_ast(&ast_head);
 
-	syntax_tree_build(&ast_head);
+	struct ast * new_ast_tree;
+	syntax_tree_build(&ast_head, &new_ast_tree);
 
-	syntax_tree_print(&syntax_tree_head);
+	syntax_tree_evaluate(new_ast_tree);
 
-	getch();
 	return 0;
 }
