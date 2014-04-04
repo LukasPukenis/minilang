@@ -33,6 +33,17 @@ struct syntax_template {
 	struct syntax_template * next;
 };
 
+// returns true if ast tree beginning with head matches the template beginning with template
+bool matches_template(struct ast * head, struct syntax_template * template) {
+	if (head->node_type != template->node_type || head->operator_type != template->operator_type) {
+		return false;
+	}
+	else if (head->next != NULL) {
+		return matches_template(head->next, template->next);
+	}	
+	return true;
+}
+
 void print_ast(struct ast * head) {
 	printf("\nPrinting AST\n");
 
