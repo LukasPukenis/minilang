@@ -17,7 +17,7 @@ typedef enum {
 
 struct ast {
 	NODE_TYPE node_type;
-	OPERATOR_TYPE operator;
+	OPERATOR_TYPE operator_type;
 	short precedence;
 	double value;
 	struct ast* next;
@@ -27,8 +27,14 @@ struct ast {
 	struct ast * parent;
 } ast_head, syntax_tree_head;
 
+struct syntax_template {
+	NODE_TYPE node_type;
+	OPERATOR_TYPE operator_type;
+	struct syntax_template * next;
+};
+
 void print_ast(struct ast * head) {
-	printf("\nPrinting AST: ");
+	printf("\nPrinting AST\n");
 
 	struct ast * curr = head;
 	if (curr->next == NULL) return;
@@ -87,7 +93,7 @@ void ast_add_operator(OPERATOR_TYPE type) {
 	new_node->next = NULL;
 	new_node->reduced = false;
 
-	new_node->operator = type;
+	new_node->operator_type = type;
 	struct ast * curr = &ast_head;
 
 	// rewing head to the last element
