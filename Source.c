@@ -167,10 +167,10 @@ void syntax_tree_build(struct ast * head, struct ast ** ast_tree) {
 		}
 		else {
 			head = head->next;
-		}		
+		}
 	}
 
-	*ast_tree = head;
+	*ast_tree = head->next;
 	printf("\nDone building\n");
 }
 
