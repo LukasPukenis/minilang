@@ -14,10 +14,11 @@ typedef enum {
 	DIV,
 	PAREN_OPEN,
 	PAREN_CLOSE,
+	FUNCTION,// +-/* are also functions a.k.a unary operators
 	END // used in template as terminating symbol
 } NODE_TYPE;
 
-const char * TOKEN_NAMES[] = {"VAL", "+", "-", "*", "/", "(", ")"};
+const char * TOKEN_NAMES[] = {"VAL", "+", "-", "*", "/", "(", ")", "FUNCTION"};
 
 struct token {	
 	NODE_TYPE node_type;	
@@ -33,6 +34,10 @@ NODE_TYPE sub_template[] = { VAL, SUB, VAL, END };
 NODE_TYPE mul_template[] = { VAL, MUL, VAL, END };
 NODE_TYPE div_template[] = { VAL, DIV, VAL, END };
 NODE_TYPE paren_template[] = { PAREN_OPEN, VAL, PAREN_CLOSE, END };
+NODE_TYPE unary_template[] = { FUNCTION, VAL, END };
+
+// Whitelist of possible unary operators. If not in this list then it's not available as unary operator
+NODE_TYPE unary_whitelist[] = { ADD, SUB, END };
 
 struct token * token_add(NODE_TYPE token) {
 	struct token * curr = &token_head;
@@ -73,7 +78,7 @@ void print_tokens(struct token * head) {
 }
 
 bool matches_template(struct token * head, NODE_TYPE * tmpl) {		
-	printf("Match a template...\n");
+	printf("Trying to match a template...\n");
 	int i = 0;
 	NODE_TYPE curr_token = tmpl[i];
 
@@ -82,10 +87,24 @@ bool matches_template(struct token * head, NODE_TYPE * tmpl) {
 		printf("curr_token = %s value=%f\n", TOKEN_NAMES[curr_token], head->value);
 
 		NODE_TYPE head_type = head->node_type;
+
+		// Reduced node is considered a value but we can't override it's operator
 		if (head->reduced) {
-			printf("DETECTED\n");
 			head_type = VAL;
 		}
+
+		bool in_unary_whitelist = false;
+		int white_list_iterator = 0;
+
+		while (unary_whitelist[white_list_iterator] != END) {
+			if (unary_whitelist[white_list_iterator] == head_type) {
+				in_unary_whitelist = true;
+				break;
+			}
+			white_list_iterator++;
+		}
+
+		if (curr_token == FUNCTION && head_type != VAL && in_unary_whitelist) curr_token = head_type;
 
 		if (head == NULL || head_type != curr_token) return false;
 
@@ -117,7 +136,7 @@ struct token * reduce(struct token * head) {
 struct token * unwrap(struct token * head) {
 	struct token * combined = head->next->next;
 	combined->reduced = true;
-	
+
 	if (head->next->next->next->next != NULL) {
 		combined->next = head->next->next->next->next;
 	} else {
@@ -126,6 +145,26 @@ struct token * unwrap(struct token * head) {
 	head->next = combined;
 	return head;
 }
+
+// Unfolds OP VAL into VAL based on OP. For example - VAL simply returns negative value of VAL
+struct token * unwrap_unary(struct token * head) {
+
+	struct token * combined = head->next->next;
+	NODE_TYPE op = head->next->node_type;
+
+	if (op == SUB) combined->value = 0 - combined->value;
+
+	combined->reduced = true;
+
+	if (head->next->next->next != NULL) {
+		combined->next = head->next->next->next;
+	} else {
+		combined->next = NULL;
+	}
+	head->next = combined;
+	return head;
+}
+
 
 // Solves a branch of AST
 double solve(struct token * head) {
@@ -155,7 +194,7 @@ void build_ast(struct token * head) {
 	struct token * curr = head;
 
 	while (head->next->next != NULL) {
-		//Parenthesis
+		// Parenthesis
 		curr = head;
 		while (curr->next != NULL) {
 			if (matches_template(curr->next, paren_template)) {
@@ -187,6 +226,18 @@ void build_ast(struct token * head) {
 				curr = curr->next;
 			}
 		}
+
+		// Unary
+		curr = head;
+		while (curr->next != NULL) {
+			if (matches_template(curr->next, unary_template)) {
+				printf("Matched template UNARY \n");
+				curr = unwrap_unary(curr);
+			} else {
+				curr = curr->next;
+			}
+		}
+
 	}
 	printf("AST has been built\n");
 }
@@ -240,7 +291,7 @@ bool parse(char * code) {
 */
 int main(int argc, char** argv)
 {	
-	parse("1+2+3");
+	parse("1+-2");
 	print_tokens(&token_head);
 	build_ast(&token_head);
 
