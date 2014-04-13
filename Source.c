@@ -1,289 +1,249 @@
+#define _CRT_SECURE_NO_WARNINGS
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <math.h>
 #include <string.h>
 
-char input[] = "4 + 3 * 2 + 1";
-
 typedef enum {
-	VALUE,
-	OPERATOR
-} NODE_TYPE;
-
-typedef enum {
+	VAL,
 	ADD,
 	SUB,
 	MUL,
 	DIV,
-	PAREN_LEFT,
-	PAREN_RIGHT
-} OPERATOR_TYPE;
+	PAREN_OPEN,
+	PAREN_CLOSE,
+	END // used in template as terminating symbol
+} NODE_TYPE;
 
-const char * OPERATOR_TYPE_NAMES[] = {"+", "-", "*", "/", "(", ")"};
+const char * TOKEN_NAMES[] = {"VAL", "+", "-", "*", "/", "(", ")"};
 
-struct ast {
-	NODE_TYPE node_type;
-	OPERATOR_TYPE operator_type;
-	double value;
-	struct ast* next;
-
+struct token {	
+	NODE_TYPE node_type;	
+	double value;	
+	struct token* next;	
+	struct token* left;
+	struct token* right;
 	bool reduced;
-	struct ast* left;
-	struct ast* right;
-	struct ast* parent;
-} ast_head;
+} token_head;
 
-/*
-	template_arithmetic is matching "VALUE OPERATOR VALUE"
-	template_parentheses is matching "( VALUE )"
-	template_unary is matching "OPERATOR VALUE"
-*/
-struct syntax_template {
-	NODE_TYPE node_type;
-	OPERATOR_TYPE operator_type;
-	struct syntax_template * next;
-} template_arithmetic, template_parentheses, template_unary;
+NODE_TYPE add_template[] = { VAL, ADD, VAL, END };
+NODE_TYPE sub_template[] = { VAL, SUB, VAL, END };
+NODE_TYPE mul_template[] = { VAL, MUL, VAL, END };
+NODE_TYPE div_template[] = { VAL, DIV, VAL, END };
+NODE_TYPE paren_template[] = { PAREN_OPEN, VAL, PAREN_CLOSE, END };
 
-void build_syntax_templates() {
-	// arithmetic template building "VAL OP VAL"
-	template_arithmetic.node_type = VALUE;
-	template_arithmetic.next = (struct syntax_template *)malloc(sizeof(struct syntax_template));
-	template_arithmetic.next->node_type = OPERATOR;
-	template_arithmetic.next->next = (struct syntax_template *)malloc(sizeof(struct syntax_template));
-	template_arithmetic.next->next->node_type = VALUE;
-	template_arithmetic.next->next->next = NULL;
+struct token * token_add(NODE_TYPE token) {
+	struct token * curr = &token_head;
+
+	while (curr->next != NULL) {
+		curr = curr->next;
+	}
+
+	struct token * n = malloc(sizeof(struct token));
+	n->node_type = token;
+	n->left = NULL;
+	n->right = NULL;
+	n->next = NULL;
+	n->reduced = false;
+	curr->next = n;
+	return n;
 }
 
-// returns true if ast tree beginning with head matches the template beginning with template
-bool matches_template(struct ast * head, struct syntax_template * check_template) {
-	if (head->node_type != check_template->node_type) {
-		return false;
+struct token * token_add_val(double val) {
+	struct token * constructed = token_add(VAL);
+	constructed->value = val;
+	return constructed;
+}
+
+void print_tokens(struct token * head) {
+	printf("Printing tokens\n");
+	
+	head = head->next;
+
+	while (head != NULL) {
+		if (head->node_type == VAL) {
+			printf("Token: %s(%f)\n", TOKEN_NAMES[head->node_type], head->value);
+		} else {
+			printf("Token: %s\n", TOKEN_NAMES[head->node_type]);
+		}		
+		head = head->next;
 	}
-	else if (head->next != NULL && check_template->next != NULL) {
-		return matches_template(head->next, check_template->next);
-	}	
+}
+
+bool matches_template(struct token * head, NODE_TYPE * tmpl) {		
+	printf("Match a template...\n");
+	int i = 0;
+	NODE_TYPE curr_token = tmpl[i];
+
+	while (curr_token != END) {
+		if (head == NULL) return false;
+		printf("curr_token = %s value=%f\n", TOKEN_NAMES[curr_token], head->value);
+
+		NODE_TYPE head_type = head->node_type;
+		if (head->reduced) {
+			printf("DETECTED\n");
+			head_type = VAL;
+		}
+
+		if (head == NULL || head_type != curr_token) return false;
+
+		i++;
+		head = head->next;		
+		curr_token = tmpl[i];
+	}
+
 	return true;
 }
 
-void print_ast(struct ast * head) {
-	printf("\nPrinting AST\n");
+// Reduces expressions. Like Head -> 1 -> + -> 2 into head->reduced(left=1, right=2, node_type = +)
+struct token * reduce(struct token * head) {
+	struct token * combined = head->next->next;
+	combined->reduced = true;
+	combined->left = head->next;
+	combined->right = combined->next;
 
-	struct ast * curr = head;
-	if (curr->next == NULL) return;
+	if (head->next->next->next->next != NULL) {
+		combined->next = head->next->next->next->next;
+	} else {
+		combined->next = NULL;
+	}
+	head->next = combined;
+	return head;
+}
 
-	curr = curr->next;
+// Unfolds (VAL) into VAL
+struct token * unwrap(struct token * head) {
+	struct token * combined = head->next->next;
+	combined->reduced = true;
+	
+	if (head->next->next->next->next != NULL) {
+		combined->next = head->next->next->next->next;
+	} else {
+		combined->next = NULL;
+	}
+	head->next = combined;
+	return head;
+}
 
-	while (curr != NULL) {
-		if (curr->node_type == VALUE) {
-			printf("Node VALUE: %f", curr->value);
+// Solves a branch of AST
+double solve(struct token * head) {
+
+	NODE_TYPE op = head->node_type;
+
+	if (head->left == NULL && head->right == NULL) {
+		return head->value;
+	}
+
+	if (op == ADD) {
+		return solve(head->left) + solve(head->right);
+	} else if (op == SUB) {
+		return solve(head->left) - solve(head->right);
+	} else if (op == MUL) {
+		return solve(head->left) * solve(head->right);
+	} else if (op == DIV) {
+		return solve(head->left) / solve(head->right);
+	} else {
+		printf("Unsupported operation! %d\n", op);
+	}
+}
+
+void build_ast(struct token * head) {
+	printf("Building AST\n");
+
+	struct token * curr = head;
+
+	while (head->next->next != NULL) {
+		//Parenthesis
+		curr = head;
+		while (curr->next != NULL) {
+			if (matches_template(curr->next, paren_template)) {
+				printf("Matched template (/)\n");
+				curr = unwrap(curr);
+			} else {
+				curr = curr->next;
+			}
+		}
+
+		// Multiplication and division
+		curr = head;
+		while (curr->next != NULL) {
+			if (matches_template(curr->next, mul_template) || matches_template(curr->next, div_template)) {
+				printf("Matched template mul/div\n");
+				curr = reduce(curr);
+			} else {
+				curr = curr->next;
+			}
+		}
+
+		// Addition and subtraction
+		curr = head;
+		while (curr->next != NULL) {
+			if (matches_template(curr->next, add_template) || matches_template(curr->next, sub_template)) {
+				printf("Matched template add/sub\n");
+				curr = reduce(curr);
+			} else {
+				curr = curr->next;
+			}
+		}
+	}
+	printf("AST has been built\n");
+}
+
+bool parse(char * code) {
+	printf("Parsing: %s\n", code);
+	int last_numeric_idx = -1;
+
+	for (int i = 0, len = strlen(code); i <= len; i++) {
+		char c = code[i];
+		if (c == ' ') continue;
+
+		if (c >= '0' && c <= '9') {
+			if (last_numeric_idx == -1)	last_numeric_idx = i;
 		}
 		else {
-			printf("Node OPERATOR: %s", OPERATOR_TYPE_NAMES[curr->operator_type]);
-		}
-		printf("\n");
-		curr = curr->next;
-	}
-}
+			if (last_numeric_idx != -1) {
+				int size = i - last_numeric_idx;				
 
-double solve(struct ast * node) {
-	OPERATOR_TYPE op_type = node->operator_type;
+				char * buffer = malloc(size);
+				strncpy(buffer, (code + last_numeric_idx), size);
+				buffer[size] = '\0';
 
-	if (node->left == NULL && node->right == NULL) {
-		printf("\nSolving: %f\n", node->value);
-		return node->value;
-	}
-
-	// binary operators
-	if (op_type == MUL) {
-		return solve(node->left) * solve(node->right);
-	} else if (op_type == DIV) {
-		return solve(node->left) / solve(node->right);
-	} else if (op_type == ADD) {
-		return solve(node->left) + solve(node->right);
-	} else if (op_type == SUB) {
-		return solve(node->left) - solve(node->right);
-	}	
-}
-
-void syntax_tree_evaluate(struct ast * head) {
-	printf("\n\nEval... ");
-	printf("Solved \"%s\" = %f", input, solve(head));
-	printf("\nSolved!\n");
-}
-
-void syntax_tree_build(struct ast * head, struct ast ** ast_tree) {
-	printf("\n\nBuilding syntax tree will\n");
-	// head = head->next; // skip first empty head node
-
-	struct ast * original_head = head;
-
-	while (head->next != NULL && head->next->next != NULL && head->next->next->next != NULL) {
-		if (!head->reduced && matches_template(head->next, &template_arithmetic) && (head->next->next->operator_type == MUL || head->next->next->operator_type == DIV)) {
-
-			struct ast * combined = head->next->next;
-			head->next->reduced = true;
-			combined->reduced = true;
-			combined->next->reduced = true;
-
-			combined->left = head->next;
-			combined->right = combined->next;
-			if (head->next->next->next->next == NULL) {
-				combined->next = NULL;
-			}
-			else {
-				combined->next = head->next->next->next->next;
-			}
-			
-			combined->node_type = VALUE;
-			head->next = combined;
-		}
-		else {
-			head = head->next;
-		}
-	}
-
-	head = original_head;
-
-	while (head->next != NULL && head->next->next != NULL && head->next->next->next != NULL) {
-		if (!head->reduced && matches_template(head->next, &template_arithmetic) && (head->next->next->operator_type == ADD || head->next->next->operator_type == SUB)) {
-
-			struct ast * combined = head->next->next;
-			head->next->reduced = true;
-			combined->reduced = true;
-			combined->next->reduced = true;
-
-			combined->left = head->next;
-			combined->right = combined->next;
-			if (head->next->next->next->next == NULL) {
-				combined->next = NULL;
-			}
-			else {
-				combined->next = head->next->next->next->next;
+				token_add_val(atof(buffer));
+				printf("Got a number: %f\n", atof(buffer));
+				last_numeric_idx = -1;
 			}
 
-			combined->node_type = VALUE;
-			head->next = combined;
+			if (c == '+') {
+				token_add(ADD);
+			} else if (c == '-') {
+				token_add(SUB);
+			} else if (c == '*') {
+				token_add(MUL);
+			} else if (c == '/') {
+				token_add(DIV);
+			} else if (c == '(') {
+				token_add(PAREN_OPEN);
+			} else if (c == ')') {
+				token_add(PAREN_CLOSE);
+			}
 		}
-		else {
-			head = head->next;
-		}
 	}
 
-	*ast_tree = head->next;
-	printf("\nDone building\n");
+	return true;
 }
 
-void ast_add_value(double value) {
-	struct ast * new_node = (struct ast*)malloc(sizeof(struct ast));
-	new_node->node_type = VALUE;
-	new_node->next = NULL;
-	new_node->left = NULL;
-	new_node->right = NULL;
-	new_node->reduced = false;
-
-	new_node->value = value;
-	struct ast * curr = &ast_head;
-
-	// rewing head to the last element
-	while (curr->next != NULL) {
-		curr = curr->next;
-	}
-
-	curr->next = new_node;
-}
-
-void ast_add_operator(OPERATOR_TYPE type) {
-	struct ast * new_node = (struct ast*)malloc(sizeof(struct ast));
-	new_node->node_type = OPERATOR;
-	new_node->next = NULL;
-	new_node->reduced = false;
-
-	new_node->operator_type = type;
-	struct ast * curr = &ast_head;
-
-	// rewing head to the last element
-	while (curr->next != NULL) {
-		curr = curr->next;
-	}
-
-	curr->next = new_node;
-}
-
+/*
+  Note that the first token is empty and first->next links to the first useful node. This is because when matching templates we must have the previous node so on first node there's no previous node
+  aaaand so we have one
+*/
 int main(int argc, char** argv)
-{
-	printf("Lets process this: %s\n", input);
+{	
+	parse("1+2+3");
+	print_tokens(&token_head);
+	build_ast(&token_head);
 
-	build_syntax_templates();
-	ast_head.next = NULL;
-
-	// This will be set once numeric is detected. Then if dot is detected it will be known it's float
-	int numeric_start_pos = -1;
-	bool last_was_numeric = false;
-	bool dot_was_detected = false;
-
-	for (int i = 0, len = sizeof(input); i < len; i++) {
-		printf("\n*************\nProcessing %c\n", input[i]);
-		char val = input[i];
-
-		// Ignore whitespace
-		if (val == ' ') continue;
-
-		// check for numeric token end
-		if (i == len || ((val < '0' || val > '9') && val != '.' && numeric_start_pos != -1 && last_was_numeric)) {
-			printf("Numeric ended at %d\n", i);
-			
-			char * buffer = malloc((i - numeric_start_pos) *sizeof(char));
-			strncpy(buffer, (input + numeric_start_pos), i - numeric_start_pos + 1);
-
-			ast_add_value(atof(buffer));
-
-			printf("Numeric translated: %f", atof(buffer));
-
-			dot_was_detected = false;
-			numeric_start_pos = -1;
-			last_was_numeric = false;
-		}
-
-		if (val >= '0' && val <= '9') {
-			printf("Numeric detected at %d. Not sure if int or float yet\n", i);
-			if (numeric_start_pos == -1 && !last_was_numeric) {
-				numeric_start_pos = i;
-				last_was_numeric = true;
-			}
-
-		}
-		else if (val == '+') {
-			ast_add_operator(ADD);
-		}
-		else if (val == '-') {
-			ast_add_operator(SUB);
-		}
-		else if (val == '*') {
-			ast_add_operator(MUL);
-		}
-		else if (val == '/') {
-			ast_add_operator(DIV);
-		}
-		else if (val == '.') {
-			dot_was_detected = true;
-		}
-		else if (val == '\0') {
-			// ASCIIZ ending. so ignore
-		}
-		else {
-			printf("Unsupported operator\n");
-
-		}
-
-	}
-
-	print_ast(&ast_head);
-
-	struct ast * new_ast_tree;
-	syntax_tree_build(&ast_head, &new_ast_tree);
-
-	syntax_tree_evaluate(new_ast_tree);
-
+	printf("Result: %f\n", solve(token_head.next));
 	return 0;
 }
