@@ -1,4 +1,4 @@
 minilang
 ========
 
-Small parser in C for learning purposes.
+mathematical equations parser in C
